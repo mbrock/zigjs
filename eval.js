@@ -66,6 +66,10 @@ let grok = {
       thing: grokExpr(src, getChild(x, "Exp1")),
       field: getChildText(src, x, "Ident"),
     }),
+
+    Prim: (src, x) => ({
+      name: getText(src, x),
+    }),
   }
 }
 
@@ -101,11 +105,11 @@ export let grokFile = (src, tree) => {
         kind: "function",
         isPublic: hasChild(x, "pub"),
         name: getChildText(src, x, "Ident"),
-        returnType: getChild(x, "Exp1"),
+        returnType: grokExpr(src, getChild(x, "Exp1")),
         params: getChildren(x, "ParamDecl").map(y => ({
           isComptime: hasChild(y, "comptime"),
           name: getChildText(src, y, "Ident"),
-          type: getChild(y, "AnyType") || getChild(y, "Expr"),
+          type: grokExpr(src, getChild(y, "AnyType") || getChild(y, "Expr")),
         })),
       })),
     ],
