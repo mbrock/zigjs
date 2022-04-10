@@ -1,4 +1,4 @@
-dist/index.js: index.js dist/zig.js
+build:;
 	./node_modules/.bin/esbuild index.js --bundle --outfile=dist/index.js \
 	   --loader:.zig=text
 

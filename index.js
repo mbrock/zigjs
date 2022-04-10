@@ -1,4 +1,4 @@
-import { evalFile } from "./eval.js"
+import { grokFile } from "./eval.js"
 import { parser } from "./dist/zig.js"
 
 import { EditorState, EditorView, basicSetup } from "@codemirror/basic-setup"
@@ -137,7 +137,7 @@ let view = new EditorView({
 })
 
 console.log(
-  evalFile(
+  grokFile(
     example,
     parser.configure({ strict: true }).parse(example)
   )

@@ -81,7 +81,7 @@ IfBind { "|" commasep<Ident> "|" }
 Init { !p12 "=" Expr }
 ParamDecl { kw<"comptime">? Ident ":" (AnyType | Expr) }
 StructBlock { "{" ( decl | FieldDecl "," )* "}" }
-Test { kw<"test"> String Block }
+Test { kw<"test"> String? Block }
 VarDecl { kw<"pub">? (kw<"const"> | kw<"var">) Ident (":" Type)? (!p12 "=" Expr)? }
 While { kw<"while"> "(" Expr ")" WhileBind? WhileAction? Stmt }
 WhileAction { ":" "(" Assignment ")" }
