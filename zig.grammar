@@ -19,6 +19,7 @@ Stmt { Expr ";" | VarDecl ";" | Assignment ";" | While | If | Block }
 
 Exp1 { lit | ref | op1 | get | typ | "(" Expr ")" }
 Expr { mut | ctl | op2 | Instantiation | Exp1 }
+Type { Expr }
 
 lit { Number | String | kw<"null"> }
 ref { Ident | AtIdent }
@@ -27,7 +28,7 @@ op1 { AddressOf }
 op2 { Equals | NotEquals | Plus | Minus | Or | And }
 mut { PlusAssign | MinusAssign }
 get { ForceField | FieldAccess | Call }
-typ { Prim | Const | Optional | Pointer | Struct }
+typ { Prim | Optional | Pointer | Struct }
 
 @precedence {
   p0 @left,
@@ -50,8 +51,8 @@ ForceField    { Exp1 !p1 "." "?" }
 Call          { Exp1 !p1 "(" commasep<Expr> ")" }
 Instantiation { Exp1 !p3 "{" commasep<FieldInit> "}" }
 AddressOf     {      !p4 "&" Exp1 }
-Pointer       {      !p4 "*" Exp1 }
-Const         {      !p4 kw<"const"> Exp1 }
+Pointer       {      !p4 "*" kw<"const">? Exp1 }
+// Const         {      !p4 kw<"const"> Exp1 }
 Optional      { "?"  !p4 Exp1 }
 Plus          { Expr !p6 "+" Expr }
 Minus         { Expr !p6 "-" Expr }
@@ -69,18 +70,19 @@ Try { kw<"try"> Expr }
 Struct { kw<"struct"> StructBlock }
 Prim { kw<"void"> | kw<"type"> | kw<"u32"> | kw<"usize"> }
 
+AnyType { kw<"anytype"> }
 Block { "{" Stmt* "}" }
 FieldDecl { Ident ":" Expr !p1 Init? }
 FieldInit { "." Ident !p12 "=" Expr }
-FnDecl { kw<"pub">? kw<"fn"> Ident "(" commasep<ParamDecl> ")" FnDeclTail }
-FnDeclTail { Exp1 ";" | Exp1 Block }
+FnDecl { kw<"pub">? kw<"fn"> Ident "(" commasep<ParamDecl> ")" fnDeclTail }
+fnDeclTail { Exp1 ";" | Exp1 Block }
 If { kw<"if"> "(" Expr ")" IfBind? Stmt (kw<"else"> Stmt) }
 IfBind { "|" commasep<Ident> "|" }
 Init { !p12 "=" Expr }
-ParamDecl { kw<"comptime">? Ident ":" (kw<"anytype"> | Expr) }
+ParamDecl { kw<"comptime">? Ident ":" (AnyType | Expr) }
 StructBlock { "{" ( decl | FieldDecl "," )* "}" }
 Test { kw<"test"> String Block }
-VarDecl { kw<"pub">? (kw<"const"> | kw<"var">) Ident (":" Expr)? !p12 "=" Expr }
+VarDecl { kw<"pub">? (kw<"const"> | kw<"var">) Ident (":" Type)? (!p12 "=" Expr)? }
 While { kw<"while"> "(" Expr ")" WhileBind? WhileAction? Stmt }
 WhileAction { ":" "(" Assignment ")" }
 WhileBind { "|" commasep<Ident> "|" }

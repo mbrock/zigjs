@@ -1,4 +1,4 @@
-import { evalFile }  from "./eval.js"
+import { evalFile } from "./eval.js"
 import { parser } from "./dist/zig.js"
 
 import { EditorState, EditorView, basicSetup } from "@codemirror/basic-setup"
@@ -135,3 +135,10 @@ let view = new EditorView({
   }),
   parent: document.body
 })
+
+console.log(
+  evalFile(
+    example,
+    parser.configure({ strict: true }).parse(example)
+  )
+)

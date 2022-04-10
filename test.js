@@ -1,4 +1,5 @@
-import { parser } from "./zig.js"
+import { parser } from "./dist/zig.js"
+import { evalFile } from "./eval.js"
 import { readFileSync } from "fs"
 
 let exampleSource = readFileSync("std/linked_list.zig").toString()

@@ -1,19 +1,36 @@
+let getText = (node, src) => src.substring(node.from, node.to)
+let getChildren = (node, type) => node.getChildren(type)
+let getChild = (node, type) => node.getChild(type)
+let hasChild = (node, type) => !!getChild(node, type)
+let getChildText = (node, type, src) => getText(getChild(node, type), src)
+
 export let evalFile = (src, tree) => {
-  let decls = new Map
-  let cursor = tree.cursor()
+  let node = tree.topNode
+  
+  return {
+    tests: getChildren(node, "Test").map(x => ({
+      name: getChildText(x, "String", src),
+      body: getChild(x, "Block"),
+    })),
 
-  if (cursor.firstChild()) do {
-    let ident = cursor.node.getChild("Ident")
-    let name = src.substring(ident.from, ident.to)
-
-    if (decls.has(name))
-      throw new Error(`duplicate decl ${name}`)
-
-    decls.set(name, {
-      type: cursor.name,
-    })
-
-  } while (cursor.nextSibling())
-
-  return { decls }
+    decls: [
+      ...getChildren(node, "VarDecl").map(x => ({
+        isPublic: hasChild(x, "pub"),
+        isConstant: hasChild(x, "const"),
+        name: getChildText(x, "Ident", src),
+        type: getChild(x, "Type"),
+        init: getChild(x, "Expr"),
+      })),
+      
+      ...getChildren(node, "FnDecl").map(x => ({
+        isPublic: hasChild(x, "pub"),
+        name: getChildText(x, "Ident", src),
+        params: getChildren(x, "ParamDecl").map(y => ({
+          isComptime: hasChild(y, "comptime"),
+          name: getChildText(y, "Ident", src),
+          type: getChild(y, "AnyType") || getChild(y, "Expr"),
+        })),
+      })),
+    ],
+  }
 }
