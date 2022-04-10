@@ -1,0 +1,19 @@
+{
+  "name": "zigjs",
+  "version": "0.0.1",
+  "description": "Zig Interpreter",
+  "main": "index.js",
+  "type": "module",
+  "repository": "https://github.com/mbrock/zigjs",
+  "author": "Mikael Brockman <mikael@brockman.se>",
+  "license": "MIT",
+  "dependencies": {
+    "@codemirror/basic-setup": "^0.19.3",
+    "@codemirror/lint": "^0.19.6",
+    "@codemirror/theme-one-dark": "^0.19.1",
+    "@lezer/common": "^0.15.12",
+    "@lezer/generator": "^0.15.4",
+    "@lezer/lr": "^0.15.8",
+    "esbuild": "^0.14.34"
+  }
+}
