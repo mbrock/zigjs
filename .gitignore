@@ -2,3 +2,5 @@
 /node_modules
 /zig.js
 /zig.terms.js
+/zig-cache
+/zig-out
