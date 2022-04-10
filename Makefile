@@ -1,7 +1,8 @@
-web: zig.js
-	./node_modules/.bin/esbuild web.js --bundle --outfile=dist/index.js --loader:.zig=text
+dist/index.js: index.js dist/zig.js
+	./node_modules/.bin/esbuild index.js --bundle --outfile=dist/index.js \
+	   --loader:.zig=text
 
-zig.js: zig.grammar
+dist/zig.js: zig.grammar
 	./node_modules/.bin/lezer-generator $< -o $@
 
-test: zig.js; node test.js
+test: test.js dist/zig.js; node test.js

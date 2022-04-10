@@ -1,5 +1,5 @@
 import { evalFile }  from "./eval.js"
-import { parser } from "./zig.js"
+import { parser } from "./dist/zig.js"
 
 import { EditorState, EditorView, basicSetup } from "@codemirror/basic-setup"
 import { LRLanguage, LanguageSupport, syntaxTree, foldNodeProp, foldInside } from "@codemirror/language"
@@ -111,14 +111,14 @@ let view = new EditorView({
             props: [
               styleTags({
                 Ident: t.name,
-                BuiltinIdent: t.macroName,
+                AtIdent: t.standard(t.function(t.name)),
                 String: t.string,
                 Comment: t.lineComment,
+                "void u32 type": t.standard(t.typeName),
                 "( )": t.paren,
-                "pub const": t.keyword,
+                "pub const struct anytype": t.keyword,
                 "try return while if else": t.controlKeyword,
                 "fn var test comptime": t.definitionKeyword,
-                "type void": t.typeName,
                 "orelse": t.operatorKeyword,
                 "null": t.null,
               }),

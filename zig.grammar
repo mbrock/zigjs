@@ -1,4 +1,33 @@
+@top File { decl* }
 @skip { spaces | newline | Comment }
+@tokens {
+  spaces { $[ ]+ }
+  newline { $[\n] }
+  Comment { "//" ![\n]* }
+  Ident { $[a-zA-Z_] $[a-zA-Z0-9_]* }
+  AtIdent { "@" $[a-zA-Z_] $[a-zA-Z0-9_]* }
+  Number { $[0-9]+ }
+  String { '"' (![\\\n"] | "\\" _)* '"'? }
+  "(" ")" "{" "}"
+}
+
+kw<word> { @specialize[@name={word}]<Ident, word> }
+commasep<content> { "" | content ("," content)* ","? }
+
+decl { FnDecl | VarDecl ";" | Test }
+Stmt { Expr ";" | VarDecl ";" | Assignment ";" | While | If | Block }
+
+Exp1 { lit | ref | op1 | get | typ | "(" Expr ")" }
+Expr { mut | ctl | op2 | Instantiation | Exp1 }
+
+lit { Number | String | kw<"null"> }
+ref { Ident | AtIdent }
+ctl { Return | Try | OrElse }
+op1 { AddressOf }
+op2 { Equals | NotEquals | Plus | Minus | Or | And }
+mut { PlusAssign | MinusAssign }
+get { ForceField | FieldAccess | Call }
+typ { Prim | Const | Optional | Pointer | Struct }
 
 @precedence {
   p0 @left,
@@ -16,121 +45,42 @@
   p12 @left
 }
 
-@top File { decl* }
+FieldAccess   { Exp1 !p1 "." Ident }
+ForceField    { Exp1 !p1 "." "?" }
+Call          { Exp1 !p1 "(" commasep<Expr> ")" }
+Instantiation { Exp1 !p3 "{" commasep<FieldInit> "}" }
+AddressOf     {      !p4 "&" Exp1 }
+Pointer       {      !p4 "*" Exp1 }
+Const         {      !p4 kw<"const"> Exp1 }
+Optional      { "?"  !p4 Exp1 }
+Plus          { Expr !p6 "+" Expr }
+Minus         { Expr !p6 "-" Expr }
+Equals        { Expr !p9 "==" Expr }
+Return        {      !p8 kw<"return"> Expr? }
+OrElse        { Expr !p8 kw<"orelse"> Expr }
+NotEquals     { Expr !p9 "!=" Expr }
+And           { Expr !p10 kw<"and"> Expr }
+Or            { Expr !p11 kw<"or"> Expr }
+Assignment    { Expr !p12 "=" Expr }
+PlusAssign    { Expr !p12 "+=" Expr }
+MinusAssign   { Expr !p12 "-=" Expr }
 
-kw<word> { @specialize[@name={word}]<Ident, word> }
-
-decl {
-  FnDecl |
-  (VarDecl ";") |
-  Test
-}
-
-Test {
-  kw<"test"> String Block
-}
-
-FnDecl {
-  kw<"pub">? kw<"fn"> Ident
-    "(" commaSep<ParamDecl> ")"
-    FnDeclTail
-}
-
-FnDeclTail {
-    (Expr ";") |
-    (Expr Block)
-}
-
-Block {
-  "{" Statement* "}"
-}
-
-VarDecl {
-  kw<"pub">? (kw<"const"> | kw<"var">) Ident (":" Expr)? !p12 "=" Expr
-}
-
-PrimType {
-  kw<"void"> | kw<"type"> | kw<"u32"> | kw<"usize">
-}
-
-OptionalType { "?" !p4 Expr }
-PointerType { !p4 "*" Expr }
-ConstType { !p4 kw<"const"> Expr }
-
-commaSep<content> { "" | content ("," content)* ","? }
-
-ParamDecl { kw<"comptime">? Ident ":" paramType }
-
-paramType { kw<"anytype"> | Expr }
-
-Statement {
-  (( Expr | VarDecl | Assignment ) ";" )
-  | While
-  | If
-  | Block
-}
-
-Assignment { Expr !p12 "=" Expr }
-While { kw<"while"> "(" Expr ")" WhileBind? WhileAction? Statement }
-WhileBind { "|" commaSep<Ident> "|" }
-WhileAction { ":" "(" Assignment ")" }
-
-If { kw<"if"> "(" Expr ")" IfBind? Statement (kw<"else"> Statement) }
-IfBind { "|" commaSep<Ident> "|" }
-
-OrElse { Expr !p8 kw<"orelse"> Expr }
-
-Expr {
-//  Instantiation |
-  Number |
-  String |
-  AddressOf |
-  PlusAssign |
-  Equals |
-  Try |
-  NotEquals |
-  Plus | Minus |
-  ForceField |
-  OrElse |
-  Ident | BuiltinIdent |
-  ConstType | OptionalType | PointerType |
-  PrimType |
-  CallExpr |
-  FieldAccessExpr |
-  StructExpr |
-  ReturnExpr |
-  Or |
-  And |
-  kw<"null">
-}
-
-Or { Expr !p11 kw<"or"> Expr }
-And { Expr !p10 kw<"and"> Expr }
 Try { kw<"try"> Expr }
-Instantiation { Expr !p3 "{" commaSep<FieldInit> "}" }
-FieldInit { "." Ident !p12 "=" Expr }
-ForceField { Expr !p1 "." "?" }
-Plus { Expr !p6 "+" Expr }
-Minus { Expr !p6 "-" Expr }
-Equals { Expr !p9 "==" Expr }
-NotEquals { Expr !p9 "!=" Expr }
-PlusAssign { Expr !p12 "+=" Expr }
-ReturnExpr { !p8 kw<"return"> Expr? }
-CallExpr { Expr !p1 "(" commaSep<Expr> ")" }
-FieldAccessExpr { Expr !p1 "." Ident }
-StructExpr { kw<"struct"> StructBlock }
-StructBlock { "{" ( decl | FieldDecl "," )* "}" }
-FieldDecl { Ident ":" Expr !p1 Init? }
-Init { !p12 "=" Expr }
-AddressOf { !p4 "&" Expr }
+Struct { kw<"struct"> StructBlock }
+Prim { kw<"void"> | kw<"type"> | kw<"u32"> | kw<"usize"> }
 
-@tokens {
-  spaces { $[ ]+ }
-  newline { $[\n] }
-  Comment { "//" ![\n]* }
-  Ident { $[a-zA-Z_] $[a-zA-Z0-9_]* }
-  BuiltinIdent { "@" $[a-zA-Z_] $[a-zA-Z0-9_]* }
-  Number { $[0-9]+ }
-  String { '"' (![\\\n"] | "\\" _)* '"'? }
-  "(" ")" "{" "}"
-}
+Block { "{" Stmt* "}" }
+FieldDecl { Ident ":" Expr !p1 Init? }
+FieldInit { "." Ident !p12 "=" Expr }
+FnDecl { kw<"pub">? kw<"fn"> Ident "(" commasep<ParamDecl> ")" FnDeclTail }
+FnDeclTail { Exp1 ";" | Exp1 Block }
+If { kw<"if"> "(" Expr ")" IfBind? Stmt (kw<"else"> Stmt) }
+IfBind { "|" commasep<Ident> "|" }
+Init { !p12 "=" Expr }
+ParamDecl { kw<"comptime">? Ident ":" (kw<"anytype"> | Expr) }
+StructBlock { "{" ( decl | FieldDecl "," )* "}" }
+Test { kw<"test"> String Block }
+VarDecl { kw<"pub">? (kw<"const"> | kw<"var">) Ident (":" Expr)? !p12 "=" Expr }
+While { kw<"while"> "(" Expr ")" WhileBind? WhileAction? Stmt }
+WhileAction { ":" "(" Assignment ")" }
+WhileBind { "|" commasep<Ident> "|" }
