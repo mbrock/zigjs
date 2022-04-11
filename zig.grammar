@@ -14,7 +14,7 @@
 kw<word> { @specialize[@name={word}]<Ident, word> }
 commasep<content> { "" | content ("," content)* ","? }
 
-Decl { FnDecl | VarDecl ";" | Test | FieldDecl "," }
+Decl { FnDecl | VarDecl ";" | TestDecl | FieldDecl "," }
 Stmt { Expr ";" | VarDecl ";" | Assignment ";" | While | If | Block }
 
 Exp1 { lit | ref | op1 | get | typ | "(" Expr ")" }
@@ -52,7 +52,7 @@ Call          { Exp1 !p1 "(" commasep<Expr> ")" }
 CallBuiltin   { AtId !p1 "(" commasep<Expr> ")" }
 Instantiation { Exp1 !p3 "{" commasep<FieldInit> "}" }
 AddressOf     {      !p4 "&" Exp1 }
-Pointer       {      !p4 "*" kw<"const">? Exp1 }
+Pointer       {      !p4 "*" const? Exp1 }
 Optional      { "?"  !p4 Exp1 }
 Plus          { Expr !p6 "+" Expr }
 Minus         { Expr !p6 "-" Expr }
@@ -74,12 +74,17 @@ AnyType { kw<"anytype"> }
 Block { "{" Stmt* "}" }
 FieldDecl { Ident ":" Expr (!p12 "=" Expr)? }
 FieldInit { "." Ident !p12 "=" Expr }
-FnDecl { kw<"pub">? kw<"fn"> Ident "(" commasep<ParamDecl> ")" Exp1 (";" | Block) }
+FnDecl { pub? fn Ident "(" commasep<ParamDecl> ")" Exp1 (";" | "{" Stmt* "}") }
 If { kw<"if"> "(" Expr ")" ifBind? Stmt (kw<"else"> Stmt) }
 ifBind { "|" commasep<Ident> "|" }
 ParamDecl { kw<"comptime">? Ident ":" (AnyType | Expr) }
-Test { kw<"test"> String? Block }
-VarDecl { kw<"pub">? (kw<"const"> | kw<"var">) Ident (":" Type)? (!p12 "=" Expr)? }
+TestDecl { kw<"test"> String? Block }
+VarDecl { pub? (const | var) Ident (":" Type)? (!p12 "=" Expr)? }
 While { kw<"while"> "(" Expr ")" whileBind? whileAction? Stmt }
 whileBind { "|" commasep<Ident> "|" }
 whileAction { ":" "(" Assignment ")" }
+
+pub { kw<"pub"> }
+const { kw<"const"> }
+var { kw<"var"> }
+fn { kw<"fn"> }
