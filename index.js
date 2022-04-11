@@ -1,4 +1,4 @@
-import { grokFile } from "./eval.js"
+import { grokFile, initContainer, evalTests } from "./eval.js"
 import { parser } from "./dist/zig.js"
 
 import { EditorState, EditorView, basicSetup } from "@codemirror/basic-setup"
@@ -111,7 +111,7 @@ let view = new EditorView({
             props: [
               styleTags({
                 Ident: t.name,
-                AtIdent: t.standard(t.function(t.name)),
+                AtId: t.standard(t.function(t.name)),
                 String: t.string,
                 Comment: t.lineComment,
                 "void u32 type": t.standard(t.typeName),
@@ -136,9 +136,10 @@ let view = new EditorView({
   parent: document.body
 })
 
-console.log(
-  grokFile(
-    example,
-    parser.configure({ strict: true }).parse(example)
-  )
+let container = grokFile(
+  example,
+  parser.configure({ strict: true }).parse(example).topNode
 )
+
+let ctx = initContainer(container)
+evalTests(ctx, x => x.match(/Singly/))

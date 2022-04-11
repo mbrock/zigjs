@@ -7,4 +7,4 @@ let exampleFile = parser.configure({
   strict: true,
 }).parse(exampleSource)
 
-console.log(grokFile(exampleSource, exampleFile))
+console.log(grokFile(exampleSource, exampleFile.topNode))
