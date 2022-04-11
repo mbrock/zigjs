@@ -14,18 +14,20 @@ class ZigBug extends Error {
   constructor(...msg: string[]) { super(msg.join(" ")) }
 }
 
-function bug(...x: string[]): Error {
+function bug(...x: any[]): Error {
+  console.error(...x)
   debugger
-  return new ZigBug(...x)
+  return new ZigBug(...x.map(x => x.toString()))
 }
 
-// class ZigError extends Error {
-//   constructor(msg: string) { super(msg) }
-// }
+class ZigError extends Error {
+  constructor(msg: string, public data: any) { super(msg) }
+}
 
-// function error(x: string): Error {
-//   return new ZigError(x)
-// }
+function error(x: string, data: any): Error {
+  console.error("𝍐", x)
+  return new ZigError(x, data)
+}
 
 interface IntType {
   kind: "IntType"
@@ -40,36 +42,57 @@ type Type =
 
 // def stmt
 
-type Stmt = VarStmt | ExprStmt | BlockStmt | WhileStmt | AssignStmt
-
-interface AssignStmt {
-  kind: "AssignStmt"
-  lhs: Expr
-  rhs: Expr
+abstract class Stmt {
+  public src: string | null
+  
+  run(stack: Stack): void {
+    throw bug("run", this, stack)
+  }
 }
 
-interface WhileStmt {
-  kind: "WhileStmt"
-  test: Expr
-  payload: string[]
-  step: Expr | null
-  body: Stmt
+// type Stmt = VarStmt | ExprStmt | BlockStmt | WhileStmt | AssignStmt
+
+class AssignStmt extends Stmt {
+  constructor(
+    public lhs: Expr,
+    public rhs: Expr,
+  ) { super() }
 }
 
-interface VarStmt {
-  kind: "VarStmt"
-  name: string
-  init: Expr | null
+class WhileStmt extends Stmt {
+  constructor(
+    public test: Expr,
+    public payload: string[],
+    public step: Expr | null,
+    public body: Stmt,
+  ) { super () }
 }
 
-interface ExprStmt {
-  kind: "ExprStmt"
-  expr: Expr
+class VarStmt extends Stmt {
+  constructor (
+    public name: string,
+    public init: Expr | null,
+  ) { super () }
+
+  run(stack: Stack): void {
+    let [scope] = stack
+    scope.set(
+      this.name,
+      new Cell(this.init ? evalExpr(stack, this.init) : null)
+    )
+  }
 }
 
-interface BlockStmt {
-  kind: "BlockStmt"
-  body: Stmt[]
+class ExprStmt extends Stmt {
+  constructor (
+    public expr: Expr,
+  ) { super () }
+}
+
+class BlockStmt extends Stmt {
+  constructor (
+    public body: Stmt[],
+  ) { super () }
 }
 
 // def expr
@@ -79,75 +102,117 @@ type ExprNodeName =
   "Instantiation" | "Try" | "FieldAccess" | "AddressOf" |
   "Equals" | "PlusAssign" | "ForceField" | "null"
 
-type Expr =
-  CallExpr | VarExpr | PrimExpr | TypeExpr | InstanceExpr |
-  TryExpr | FieldAccessExpr | Op2Expr | NumberExpr | AddressExpr |
-  ForceExpr | NullExpr
+class Expr {
+  public src: string | null
+  
+  eval(_stack: Stack): Value {
+    throw bug("Define evaluation for", this)
+  }
+}
 
 type Op2 = "==" | "=" | "+="
 
-interface NullExpr {
-  kind: "NullExpr"
+class NullExpr extends Expr {
+  constructor() { super() }
 }
 
-interface ForceExpr {
-  kind: "ForceExpr"
-  expr: Expr
+class ForceExpr extends Expr {
+  constructor(
+    public expr: Expr,
+  ) { super() }
 }
 
-interface Op2Expr {
-  kind: "Op2Expr"
-  op: Op2
-  lhs: Expr
-  rhs: Expr
+class Op2Expr extends Expr {
+  constructor(
+    public op: Op2,
+    public lhs: Expr,
+    public rhs: Expr,
+  ) { super() }
 }
 
-interface AddressExpr {
-  kind: "AddressExpr"
-  target: Expr
+class AddressExpr extends Expr {
+  constructor(
+    public target: Expr,
+  ) { super() }
 }
 
-interface NumberExpr {
-  kind: "NumberExpr"
-  val: number // should use BigInteger
+class NumberExpr extends Expr {
+  constructor(
+    public val: number,
+  ) { super() }
 }
 
-interface TypeExpr {
-  kind: "TypeExpr"
-  type: Type
+// class TypeExpr extends Expr {
+//   constructor(
+//     public type: Type,
+//   ) { super() }
+// }
+
+class CallExpr extends Expr {
+  constructor(
+    public callee: Expr,
+    public args: Expr[],
+  ) { super() }
+
+  eval(stack: Stack): Value {
+    let callee = evalExpr(stack, this.callee)
+    let args = this.args.map(x => evalExpr(stack, x))
+
+    throw bug("implement call expr", callee, args)
+  }
 }
 
-interface CallExpr {
-  kind: "CallExpr"
-  calleeExpr: Expr
-  argExprs: Expr[]
+class VarExpr extends Expr {
+  constructor(
+    public name: string
+  ) { super() }
+
+  eval(stack: Stack): Value {
+    for (let scope of stack) {
+      if (scope.has(this.name)) {
+        let { value } = scope.get(this.name)
+        if (value === undefined) {
+          throw error(`used empty local variable ${this.name}`, {
+            expr: this,
+            stack,
+            scope,
+          })
+        } else {
+          return value
+        }
+      }
+    }
+
+    throw error(`reference to unknown symbol ${this.name}`, {
+      expr: this, stack
+    })
+  }
 }
 
-interface VarExpr {
-  kind: "VarExpr"
-  name: string
+class PrimExpr extends Expr {
+  constructor(
+    public type: Type
+  ) { super() }
 }
 
-interface PrimExpr {
-  kind: "PrimExpr"
-  type: Type
+class InstanceExpr extends Expr {
+  constructor(
+    public type: Expr,
+    public fields: { name: string, expr: Expr }[],
+  ) { super() }
 }
 
-interface InstanceExpr {
-  kind: "InstanceExpr"
-  typeExpr: Expr
-  fieldExprs: { name: string, expr: Expr }[],
+class TryExpr extends Expr {
+  constructor(
+    public expr: Expr
+  ) { super() }
 }
 
-interface TryExpr {
-  kind: "TryExpr"
-  expr: Expr
-}
-
-interface FieldAccessExpr {
-  kind: "FieldAccessExpr"
-  lhs: Expr
-  fieldName: string
+class FieldAccessExpr extends Expr {
+  constructor(
+    public lhs: Expr,
+    public field: string,
+  ) { super() }
 }
 
 interface TestDecl {
@@ -159,8 +224,9 @@ interface TestDecl {
 interface VarDecl {
   kind: "VarDecl"
   name: string
+  isConstant: boolean
   typeExpr: Lazy<Expr>
-  initExpr: Lazy<Expr>
+  initExpr: null | Lazy<Expr>
 }
 
 interface Param {
@@ -193,6 +259,128 @@ const primTypes: Record<string, Type> = {
     unsigned: true,
     bits: 32,
   },
+}
+
+interface IntValue {
+  kind: "IntValue"
+  int: number
+}
+
+type Value = IntValue
+
+class Cell {
+  constructor(
+    public value: null | Value
+  ) {}
+}
+
+// type LazyScope = Map<string, Lazy<Cell>>
+
+type Scope = Map<string, Cell>
+type Stack = Scope[]
+
+/// This is a concrete struct type, not a struct instance.
+export class Struct {
+  parent: null | Struct
+  
+  constants = new Map<string, Lazy<Value>>()
+  variables = new Map<string, Cell>()
+
+  circularity = new Set<string>()
+
+  constructor(
+    decl: StructDecl
+  ) {
+    // * Variable declarations are initialized lazily.
+    // * We need to detect circular dependencies.
+    
+    for (const x of decl.decls.values()) {
+      const { kind, name } = x
+      if (kind == "VarDecl") {
+        if (x.isConstant) {
+          this.constants.set(name, this.lazyInitializer(x))
+        } else {
+          this.variables.set(name, new Cell(evalExpr([], x.initExpr.need())))
+        }
+      }
+    }
+  }
+
+
+  lazyInitializer(x: VarDecl): Lazy<Value> {
+    let { name } = x
+    return new Lazy(() => {
+      if (this.circularity.has(name)) {
+        throw error("circularity", name)
+      } else {
+        this.circularity.add(name)
+        try {
+          let value = evalExpr([], x.initExpr.need())
+          return value
+        } finally {
+          this.circularity.delete(name)
+        }
+      }
+    })
+  }
+  
+  runTests(
+    mod: StructDecl,
+    predicate: (name: string) => boolean
+  ) : void {
+    console.groupCollapsed("⚙", "module:", mod.name)
+    console.log(mod.decls)
+    console.groupEnd()
+    
+    for (let decl of mod.decls.values()) {
+      if (decl.kind == "TestDecl") {
+        if (predicate.call(null, decl.name)) {
+          this.runTest(decl)
+        } else {
+          console.info("skipping", decl.name)
+        }
+      }
+    }
+  }
+
+  runTest(decl: TestDecl): void {
+    try {
+      console.group("🤓", "Test:", decl.name)
+      let body = decl.body.need()
+      let stack = [new Map<string, Cell>()]
+      for (let stmt of body) {
+        runStmt(stack, stmt)
+      }
+    } finally {
+      console.groupEnd()
+    }
+  }
+}
+
+function runStmt(stack: Stack, stmt: Stmt): void {
+  console.group("⦿", stmt.src)
+  try {
+    stmt.run(stack)
+  } finally {
+    console.groupEnd()
+  }
+}
+
+function evalExpr(stack: Stack, expr: Expr): Value {
+  console.group("•", expr.src)
+  try {
+    let result = expr.eval(stack)
+    console.info("⮑", result)
+    return result
+  } finally {
+    console.groupEnd()
+  }
+}
+
+export function grokFile(
+  src: string, name: string, node: SyntaxNode
+): StructDecl {
+  return new Grok(src).grokStruct(name, node)
 }
 
 type DeclNodeName = "TestDecl" | "VarDecl" | "FnDecl"
@@ -271,8 +459,11 @@ class Grok {
         return {
           kind,
           name: this.getChildText(x, "Ident"),
+          isConstant: hasChild(x, "const"),
           typeExpr: lazy(() => this.grokExpr(getChild(x, "Type"))),
-          initExpr: lazy(() => this.grokExpr(getChild(x, "Expr"))),
+          initExpr: hasChild(x, "Expr")
+            ? lazy(() => this.grokExpr(getChild(x, "Expr")))
+            : null,
         }
 
       case "FnDecl":
@@ -302,112 +493,105 @@ class Grok {
         : this.grokExpr(getChild(n, "Expr")),
     }
   }
-  
+
   grokStmt(stmtNode: SyntaxNode): Stmt {
+    let stmt = this.grokStmt_(stmtNode)
+    stmt.src = this.getText(stmtNode)
+    return stmt
+  }
+  
+  grokStmt_(stmtNode: SyntaxNode): Stmt {
     let x = stmtNode.firstChild
     let kind = x.name
     switch (kind) {
-      case "VarDecl": return {
-        kind: "VarStmt",
-        name: this.getChildText(x, "Ident"),
-        init: hasChild(x, "Expr")
+      case "VarDecl": return new VarStmt(
+        this.getChildText(x, "Ident"),
+        hasChild(x, "Expr")
           ? this.grokExpr(getChild(x, "Expr"))
           : null,
-      }
+      )
 
-      case "Expr": return {
-        kind: "ExprStmt",
-        expr: this.grokExpr(x),
-      }
+      case "Expr": return new ExprStmt(
+        this.grokExpr(x),
+      )
 
-      case "Block": return {
-        kind: "BlockStmt",
-        body: getChildren(x, "Stmt").map(y => this.grokStmt(y))
-      }
+      case "Block": return new BlockStmt(
+        getChildren(x, "Stmt").map(y => this.grokStmt(y)),
+      )
 
-      case "While": return {
-        kind: "WhileStmt",
-        test: this.grokExpr(getChild(x, "Expr")),
-        payload: getChildren(x, "Ident").map(x => this.getText(x)),
-        step: getChild(x, "Assignment")
+      case "While": return new WhileStmt(
+        this.grokExpr(getChild(x, "Expr")),
+        getChildren(x, "Ident").map(x => this.getText(x)),
+        getChild(x, "Assignment")
           && this.grokBinop(getChild(x, "Assignment"), "="),
-        body: this.grokStmt(getChild(x, "Stmt")),
-      }
+        this.grokStmt(getChild(x, "Stmt")),
+      )
 
-      case "Assignment": return {
-        kind: "AssignStmt",
-        lhs: this.grokExpr(getChildren(x, "Expr")[0]),
-        rhs: this.grokExpr(getChildren(x, "Expr")[1]),
-      }
+      case "Assignment": return new AssignStmt(
+        this.grokExpr(getChildren(x, "Expr")[0]),
+        this.grokExpr(getChildren(x, "Expr")[1]),
+      )
         
       default: throw bug("grok stmt", kind)
     }
   }
 
-  grokExpr(exprNode: SyntaxNode): Expr {
+  grokExpr(x: SyntaxNode): Expr {
+    let expr = this.grokExpr_(x)
+    expr.src = this.getText(x)
+    return expr
+  }
+
+  grokExpr_(exprNode: SyntaxNode): Expr {
     let x = exprNode.firstChild
     let kind = x.name
     switch (x.name as ExprNodeName) {
       case "Exp1": return this.grokExpr(x)
 
-      case "Call": return {
-        kind: "CallExpr",
-        calleeExpr: this.grokExpr(getChild(x, "Exp1")),
-        argExprs: getChildren(x, "Expr").map(y => this.grokExpr(y)),
-      }
+      case "Call": return new CallExpr(
+        this.grokExpr(getChild(x, "Exp1")),
+        getChildren(x, "Expr").map(y => this.grokExpr(y)),
+      )
 
-      case "Ident": return {
-        kind: "VarExpr",
-        name: this.getText(x),
-      }
+      case "Ident": return new VarExpr(
+        this.getText(x),
+      )
 
-      case "Prim": return {
-        kind: "TypeExpr",
-        type: primTypes[this.getText(x)],
-      }
+      case "Prim": return new PrimExpr(
+        primTypes[this.getText(x)],
+      )
 
-      case "Number": return {
-        kind: "NumberExpr",
-        val: parseInt(this.getText(x)),
-      }
+      case "Number": return new NumberExpr(
+        parseInt(this.getText(x)),
+      )
 
-      case "AddressOf": return {
-        kind: "AddressExpr",
-        target: this.grokExpr(getChild(x, "Exp1")),
-      }
+      case "AddressOf": return new AddressExpr(
+        this.grokExpr(getChild(x, "Exp1")),
+      )
 
-      case "Instantiation": return {
-        kind: "InstanceExpr",
-        typeExpr: this.grokExpr(getChild(x, "Exp1")),
-        fieldExprs: getChildren(x, "FieldInit")
+      case "Instantiation": return new InstanceExpr(
+        this.grokExpr(getChild(x, "Exp1")),
+        getChildren(x, "FieldInit")
           .map(y => this.grokFieldInit(y)),
-      }
+      )
 
-      case "Try": return {
-        kind: "TryExpr",
-        expr: this.grokExpr(getChild(x, "Expr")),
-      }
+      case "Try": return new TryExpr(
+        this.grokExpr(getChild(x, "Expr")),
+      )
 
-      case "FieldAccess": return {
-        kind: "FieldAccessExpr",
-        lhs: this.grokExpr(getChild(x, "Exp1")),
-        fieldName: this.getChildText(x, "Ident"),
-      }
+      case "FieldAccess": return new FieldAccessExpr(
+        this.grokExpr(getChild(x, "Exp1")),
+        this.getChildText(x, "Ident"),
+      )
 
-      case "Equals":
-        return this.grokBinop(x, "==")
+      case "Equals"     : return this.grokBinop(x, "==")
+      case "PlusAssign" : return this.grokBinop(x, "+=")
 
-      case "PlusAssign":
-        return this.grokBinop(x, "+=")
+      case "ForceField": return new ForceExpr(
+        this.grokExpr(getChild(x, "Exp1")),
+      )
 
-      case "ForceField": return {
-        kind: "ForceExpr",
-        expr: this.grokExpr(getChild(x, "Exp1")),
-      }
-
-      case "null": return {
-        kind: "NullExpr",
-      }
+      case "null": return new NullExpr
         
       default: throw bug("grok expr", kind)
     }
@@ -422,72 +606,11 @@ class Grok {
 
   grokBinop(x: SyntaxNode, name: Op2): Op2Expr {
     let [lhs, rhs] = getChildren(x, "Expr")
-    return {
-      kind: "Op2Expr",
-      op: name,
-      lhs: this.grokExpr(lhs),
-      rhs: this.grokExpr(rhs),
-    }
+    return new Op2Expr(
+      name,
+      this.grokExpr(lhs),
+      this.grokExpr(rhs),
+    )
   }
 }
 
-interface IntValue {
-  kind: "IntValue"
-  int: number
-}
-
-type Value = IntValue
-
-type Cell = {
-  value: undefined | Value
-}
-
-// interface CellPointer {
-//   kind: "cellPointer"
-//   cell: Cell
-// }
-
-// type Pointer = CellPointer
-
-type Stack = Map<string, Cell>[]
-
-export class Zig {
-  evalTests(
-    mod: StructDecl,
-    predicate: (name: string) => boolean
-  ) : void {
-    console.log(mod)
-    for (let decl of mod.decls.values()) {
-      if (decl.kind == "TestDecl") {
-        if (predicate.call(null, decl.name)) {
-          this.runTest(decl)
-        } else {
-          console.info("skipping", decl.name)
-        }
-      }
-    }
-  }
-
-  runTest(decl: TestDecl): void {
-    try {
-      console.group("test", decl.name)
-      let body = decl.body.need()
-      let stack = [new Map<string, Cell>()]
-      for (let stmt of body) {
-        this.runStmt(stack, stmt)
-      }
-    } finally {
-      console.groupEnd()
-    }
-  }
-
-  runStmt(stack: Stack, stmt: Stmt): void {
-    console.log(stack, stmt)
-  }
-}
-
-export function grokFile(
-  src: string, name: string, node: SyntaxNode
-): StructDecl {
-  return new Grok(src).grokStruct(name, node)
-}

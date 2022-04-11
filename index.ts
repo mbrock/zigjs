@@ -1,4 +1,4 @@
-import { grokFile, Zig } from "./zigeval"
+import { grokFile, Struct } from "./zigeval"
 import { parser } from "./dist/zig"
 
 import { EditorState, EditorView, basicSetup } from "@codemirror/basic-setup"
@@ -6,8 +6,8 @@ import { LRLanguage, LanguageSupport, syntaxTree, foldNodeProp, foldInside } fro
 import { linter } from "@codemirror/lint"
 import { styleTags, tags as t } from "@codemirror/highlight"
 import { hoverTooltip } from "@codemirror/tooltip"
-import { Decoration, keymap } from "@codemirror/view"
-import { EditorSelection, StateField, StateEffect } from "@codemirror/state"
+import {  keymap } from "@codemirror/view"
+import { EditorSelection } from "@codemirror/state"
 import { oneDark } from "@codemirror/theme-one-dark"
 
 import example from "./std/linked_list.zig"
@@ -121,5 +121,5 @@ let mod = grokFile(
   parser.configure({ strict: true }).parse(example).topNode
 )
 
-let zig = new Zig
-zig.evalTests(mod, (x: string) => !!x.match(/Singly/))
+let ctx = new Struct(mod)
+ctx.runTests(mod, (x: string) => !!x.match(/Singly/))
