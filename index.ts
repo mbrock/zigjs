@@ -1,4 +1,5 @@
-import { grokFile, Struct } from "./zigeval"
+import { grokFile } from "./grok"
+import { Struct } from "./zigeval"
 import { parser } from "./dist/zig"
 
 import { EditorState, EditorView, basicSetup } from "@codemirror/basic-setup"
