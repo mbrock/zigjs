@@ -36,24 +36,24 @@ export class Cell<T, Meta = null> {
   
   constructor(
     public mutability: Mutability,
-    private thunk: () => T,
+    private thunk: () => Generator<Suspension, T>,
     public meta: Meta,
   ) {}
 
-  get value() {
+  *read() {
     switch (this.state) {
       case "have": return this.content
       case "busy": throw error("circular dependency", this)
       case "need": {
         this.state = "busy"
-        this.content = this.thunk()
+        this.content = yield* this.thunk()
         this.state = "have"
         return this.content
       }
     }
   }
   
-  set value(x: T) {
+  write(x: T) {
     if (this.mutability === Mutability.Constant) {
       throw error("change constant", this)
     } else { 
@@ -63,7 +63,7 @@ export class Cell<T, Meta = null> {
 }
 
 export function lazy<T, Meta = null>(
-  thunk: () => T,
+  thunk: () => Generator<Suspension, T>,
   mutability: Mutability = Mutability.Constant,
   meta: Meta = null,
 ): Cell<T, Meta> {
@@ -75,7 +75,14 @@ export function eager<T, Meta>(
   mutability: Mutability = Mutability.Constant,
   meta: Meta = null,
 ): Cell<T, Meta> {
-  return lazy(() => value, mutability, meta)
+  return lazy(function*() { return value }, mutability, meta)
+}
+
+type Value = IntValue | FunctionValue | TypeValue
+
+interface TypeValue {
+  kind: "TypeValue"
+  type: Type
 }
 
 interface IntValue {
@@ -83,7 +90,12 @@ interface IntValue {
   int: number
 }
 
-type Value = IntValue
+interface FunctionValue {
+  kind: "FunctionValue"
+  decl: FnDecl
+  container: Container
+  stack: Frame
+}
 
 interface Binder<T> {
   parent: null | typeof this
@@ -131,21 +143,33 @@ function bindWithoutShadowing<T>(
 
 export class Container {
   bindings = new Map<string, Cell<Value, Decl>>()
-
+  
   constructor(
-    public name: string = "anonymous",
+    public name: string,
     public decl: StructDecl,
     public stack: Frame,
     public parent: null | Container = null,
-  ) {
-    for (const x of decl.decls.values()) {
+  ) {}
+  
+  *initialize() {
+    for (const x of this.decl.decls.values()) {
       const { kind, name } = x
-      let thunk: () => Value
+      let thunk: () => Generator<Suspension, Value>
       
       if (kind == "VarDecl") {
-        thunk = () => evalExpr(this, this.stack, x.initExpr.value)
+        thunk = function* () {
+          return yield* evalExpr(
+            this, this.stack, yield* x.initExpr.read())
+        }
       } else if (kind == "FnDecl") {
-        thunk = () => { throw bug("implement functions") }
+        thunk = function* () {
+          return {
+            kind: "FunctionValue",
+            decl: x,
+            container: this,
+            stack: this.stack,
+          }
+        }
       } else if (kind == "TestDecl") {
         thunk = () => { throw bug("implement tests") }
       } else {
@@ -176,10 +200,10 @@ export class Container {
     }
   }
 
-  runTest(name: string, decl: TestDecl): void {
+  *runTest(name: string, decl: TestDecl): Generator<Suspension, void> {
     try {
       console.group("🤓", "Test:", name)
-      let body = decl.body.value
+      let body = yield* decl.body.read()
       for (let stmt of body) {
         runStmt(this, this.stack, stmt)
       }
@@ -189,10 +213,15 @@ export class Container {
   }
 }
 
+type Suspension =
+  { kind: "return", value: Value }
+
 export abstract class Stmt {
   public src: string | null
   
-  run(_container: Container, _stack: Frame): void {
+  *run(
+    _container: Container, _stack: Frame
+  ): Generator<Suspension, void> {
     throw bug("Define evaluation for", this)
   }
 }
@@ -200,16 +229,18 @@ export abstract class Stmt {
 export abstract class Expr {
   public src: string | null
   
-  eval(_container: Container, _stack: Frame): Value {
+  *eval(
+    _container: Container, _stack: Frame
+  ): Generator<Suspension, Value> {
     throw bug("Define evaluation for", this)
   }
 }
 
-function runStmt(
+function* runStmt(
   container: Container,
   stack: Frame,
   stmt: Stmt,
-): void {
+): Generator<Suspension, void> {
   console.group("⦿", stmt.src)
   try {
     stmt.run(container, stack)
@@ -218,14 +249,14 @@ function runStmt(
   }
 }
 
-function evalExpr(
+function* evalExpr(
   container: Container,
   stack: Frame,
   expr: Expr,
-): Value {
+): Generator<Suspension, Value> {
   console.group("•", expr.src)
   try {
-    let result = expr.eval(container, stack)
+    let result = yield* expr.eval(container, stack)
     console.info("⮑", result)
     return result
   } finally {
@@ -365,10 +396,24 @@ export class CallExpr extends Expr {
   ) { super() }
 
   eval(container: Container, stack: Frame): Value {
-    let callee = evalExpr(container, stack, this.callee)
-    let args = this.args.map(x => evalExpr(container, stack, x))
+    const callee = evalExpr(container, stack, this.callee)
+    const args = this.args.map(x => evalExpr(container, stack, x))
 
-    throw bug("implement call expr", callee, args)
+    if (callee.kind === "FunctionValue") {
+      const params = callee.decl.params.value
+      const body = callee.decl.body.value
+      
+      if (params.length !== args.length) {
+        throw error("args mismatch", { callee, params, args })
+      }
+
+      let frame = new Frame(new Map(), callee.stack)
+      params.forEach((param, i) => {
+        bindWithoutShadowing(frame, param.name, eager(args[i]))
+      })
+    } else {
+      debugger
+    }
   }
 }
 
@@ -395,6 +440,10 @@ export class PrimExpr extends Expr {
   constructor(
     public type: Type
   ) { super() }
+
+  eval(_container: Container, _stack: Frame): Value {
+    return { kind: "TypeValue", type: this.type }
+  }
 }
 
 export class InstanceExpr extends Expr {
