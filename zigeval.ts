@@ -6,37 +6,8 @@
 // Copyright 2022, Mikael Brockman <mikael@brockman.se>
 //
 
-class Cell {
-  constructor(
-    public value: null | Value
-  ) {}
-}
-
-type Scope = Map<string, Cell>
-type Stack = Scope[]
-
-export class Lazy<T> {
-  value: T
-  state: "have" | "need" | "busy" = "need"
-  
-  constructor(private thunk: () => T) {}
-  
-  need(): T {
-    switch (this.state) {
-      case "have": return this.value
-      case "busy": throw error("circular dependency", this)
-      case "need": {
-        this.state = "busy"
-        this.value = this.thunk()
-        this.state = "have"
-        return this.value
-      }
-    }
-  }
-}
-
-export function lazy<T>(f: () => T): Lazy<T> {
-  return new Lazy(f)
+class ZigError extends Error {
+  constructor(msg: string, public data: any) { super(msg) }
 }
 
 export class ZigBug extends Error {
@@ -49,13 +20,62 @@ export function bug(...x: any[]): Error {
   return new ZigBug(...x.map(x => x.toString()))
 }
 
-class ZigError extends Error {
-  constructor(msg: string, public data: any) { super(msg) }
-}
-
 function error(x: string, data: any): Error {
   console.error("𝍐", x)
   return new ZigError(x, data)
+}
+
+export enum Mutability {
+  Constant = "Constant",
+  Variable = "Variable",
+}
+
+export class Cell<T, Meta = null> {
+  content: T | undefined
+  state: "have" | "need" | "busy" = "need"
+  
+  constructor(
+    public mutability: Mutability,
+    private thunk: () => T,
+    public meta: Meta,
+  ) {}
+
+  get value() {
+    switch (this.state) {
+      case "have": return this.content
+      case "busy": throw error("circular dependency", this)
+      case "need": {
+        this.state = "busy"
+        this.content = this.thunk()
+        this.state = "have"
+        return this.content
+      }
+    }
+  }
+  
+  set value(x: T) {
+    if (this.mutability === Mutability.Constant) {
+      throw error("change constant", this)
+    } else { 
+      this.content = x
+    }
+  }
+}
+
+export function lazy<T, Meta = null>(
+  thunk: () => T,
+  mutability: Mutability = Mutability.Constant,
+  meta: Meta = null,
+): Cell<T, Meta> {
+  return new Cell(mutability, thunk, meta)
+}
+
+export function eager<T, Meta>(
+  value: T,
+  mutability: Mutability = Mutability.Constant,
+  meta: Meta = null,
+): Cell<T, Meta> {
+  return lazy(() => value, mutability, meta)
 }
 
 interface IntValue {
@@ -65,63 +85,103 @@ interface IntValue {
 
 type Value = IntValue
 
-/// This is a concrete struct type, not a struct instance.
-export class Struct {
-  parent: null | Struct
-  
-  constants = new Map<string, Lazy<Value>>()
-  variables = new Map<string, Cell>()
+interface Binder<T> {
+  parent: null | typeof this
+  bindings: Map<string, T>
+}
+
+export class Frame implements Binder<Cell<Value>> {
+  constructor(
+    public bindings: Map<string, Cell<Value>> = new Map(),
+    public parent: null | Frame = null,
+  ) {}
+}
+
+function resolve<T>(
+  binder: Binder<T>,
+  name: string,
+): T | undefined {
+  if (binder.bindings.has(name)) {
+    return binder.bindings.get(name)
+  } else if (binder.parent !== null) {
+    return resolve(binder.parent, name)
+  } else {
+    return undefined
+  }
+}
+
+function isBindingVisible<T>(
+  binder: Binder<T>,
+  name: string,
+): boolean {
+  return resolve(binder, name) !== undefined
+}
+
+function bindWithoutShadowing<T>(
+  binder: Binder<T>,
+  name: string,
+  value: T,
+): void {
+  if (isBindingVisible(binder, name)) {
+    throw error("shadowing", { name, binder })
+  } else {
+    binder.bindings.set(name, value)
+  }
+}
+
+export class Container {
+  bindings = new Map<string, Cell<Value, Decl>>()
 
   constructor(
-    decl: StructDecl
+    public name: string = "anonymous",
+    public decl: StructDecl,
+    public stack: Frame,
+    public parent: null | Container = null,
   ) {
-    // * Variable declarations are initialized lazily.
-    // * We need to detect circular dependencies.
-    
     for (const x of decl.decls.values()) {
       const { kind, name } = x
+      let thunk: () => Value
+      
       if (kind == "VarDecl") {
-        if (x.isConstant) {
-          this.constants.set(
-            name, this.lazyInitializer(x))
-        } else {
-          this.variables.set(
-            name, new Cell(evalExpr([], x.initExpr.need())))
-        }
+        thunk = () => evalExpr(this, this.stack, x.initExpr.value)
+      } else if (kind == "FnDecl") {
+        thunk = () => { throw bug("implement functions") }
+      } else if (kind == "TestDecl") {
+        thunk = () => { throw bug("implement tests") }
+      } else {
+        throw bug(kind)
       }
-    }
-  }
 
-  lazyInitializer(x: VarDecl): Lazy<Value> {
-    return new Lazy(() => evalExpr([], x.initExpr.need()))
+      bindWithoutShadowing(
+        this, name, lazy(thunk, Mutability.Constant, x))
+    }
   }
   
   runTests(
-    mod: StructDecl,
     predicate: (name: string) => boolean
-  ) : void {
-    console.groupCollapsed("⚙", "module:", mod.name)
-    console.log(mod.decls)
+  ): void {
+    console.groupCollapsed("⚙", "Bindings for", this.name)
+    console.log(this.bindings)
     console.groupEnd()
     
-    for (let decl of mod.decls.values()) {
-      if (decl.kind == "TestDecl") {
-        if (predicate.call(null, decl.name)) {
-          this.runTest(decl)
+    for (const cell of this.bindings.values()) {
+      const { kind, name } = cell.meta
+      if (kind == "TestDecl") {
+        if (predicate.call(null, name)) {
+          this.runTest(name, cell.meta)
         } else {
-          console.info("skipping", decl.name)
+          console.info("skipping", name)
         }
       }
     }
   }
 
-  runTest(decl: TestDecl): void {
+  runTest(name: string, decl: TestDecl): void {
     try {
-      console.group("🤓", "Test:", decl.name)
-      let body = decl.body.need()
-      let stack = [new Map<string, Cell>()]
+      console.group("🤓", "Test:", name)
+      let body = decl.body.value
       for (let stmt of body) {
-        runStmt(stack, stmt)
+        runStmt(this, this.stack, stmt)
       }
     } finally {
       console.groupEnd()
@@ -132,7 +192,7 @@ export class Struct {
 export abstract class Stmt {
   public src: string | null
   
-  run(_stack: Stack): void {
+  run(_container: Container, _stack: Frame): void {
     throw bug("Define evaluation for", this)
   }
 }
@@ -140,24 +200,32 @@ export abstract class Stmt {
 export abstract class Expr {
   public src: string | null
   
-  eval(_stack: Stack): Value {
+  eval(_container: Container, _stack: Frame): Value {
     throw bug("Define evaluation for", this)
   }
 }
 
-function runStmt(stack: Stack, stmt: Stmt): void {
+function runStmt(
+  container: Container,
+  stack: Frame,
+  stmt: Stmt,
+): void {
   console.group("⦿", stmt.src)
   try {
-    stmt.run(stack)
+    stmt.run(container, stack)
   } finally {
     console.groupEnd()
   }
 }
 
-function evalExpr(stack: Stack, expr: Expr): Value {
+function evalExpr(
+  container: Container,
+  stack: Frame,
+  expr: Expr,
+): Value {
   console.group("•", expr.src)
   try {
-    let result = expr.eval(stack)
+    let result = expr.eval(container, stack)
     console.info("⮑", result)
     return result
   } finally {
@@ -175,15 +243,15 @@ export interface StructDecl {
 export interface TestDecl {
   kind: "TestDecl"
   name: string
-  body: Lazy<Stmt[]>
+  body: Cell<Stmt[]>
 }
 
 export interface VarDecl {
   kind: "VarDecl"
   name: string
-  isConstant: boolean
-  typeExpr: Lazy<Expr>
-  initExpr: null | Lazy<Expr>
+  mutability: Mutability
+  typeExpr: Cell<Expr>
+  initExpr: null | Cell<Expr>
 }
 
 export interface Param {
@@ -196,9 +264,9 @@ export interface FnDecl {
   kind: "FnDecl"
   name: string
   isPublic: boolean
-  params: Lazy<Param[]>
-  returnTypeExpr: Lazy<Expr>
-  body: Lazy<Stmt[]>
+  params: Cell<Param[]>
+  returnTypeExpr: Cell<Expr>
+  body: Cell<Stmt[]>
 }
 
 interface IntType {
@@ -233,15 +301,14 @@ export class WhileStmt extends Stmt {
 export class VarStmt extends Stmt {
   constructor (
     public name: string,
+    public mutability: Mutability,
     public init: Expr | null,
   ) { super () }
 
-  run(stack: Stack): void {
-    let [scope] = stack
-    scope.set(
-      this.name,
-      new Cell(this.init ? evalExpr(stack, this.init) : null)
-    )
+  run(container: Container, stack: Frame): void {
+    let value = evalExpr(container, stack, this.init)
+    bindWithoutShadowing(
+      stack, this.name, eager(value, this.mutability))
   }
 }
 
@@ -297,9 +364,9 @@ export class CallExpr extends Expr {
     public args: Expr[],
   ) { super() }
 
-  eval(stack: Stack): Value {
-    let callee = evalExpr(stack, this.callee)
-    let args = this.args.map(x => evalExpr(stack, x))
+  eval(container: Container, stack: Frame): Value {
+    let callee = evalExpr(container, stack, this.callee)
+    let args = this.args.map(x => evalExpr(container, stack, x))
 
     throw bug("implement call expr", callee, args)
   }
@@ -310,25 +377,17 @@ export class VarExpr extends Expr {
     public name: string
   ) { super() }
 
-  eval(stack: Stack): Value {
-    for (let scope of stack) {
-      if (scope.has(this.name)) {
-        let { value } = scope.get(this.name)
-        if (value === undefined) {
-          throw error(`used empty local variable ${this.name}`, {
-            expr: this,
-            stack,
-            scope,
-          })
-        } else {
-          return value
-        }
-      }
+  eval(container: Container, stack: Frame): Value {
+    const { name } = this
+    
+    const cell = resolve(stack, name) || resolve(container, name)
+    if (cell !== undefined) {
+      return cell.value
+    } else {
+      throw error(`unbound identifier ${this.name}`, {
+        expr: this, container, stack
+      })
     }
-
-    throw error(`reference to unknown symbol ${this.name}`, {
-      expr: this, stack
-    })
   }
 }
 
@@ -357,5 +416,3 @@ export class FieldAccessExpr extends Expr {
     public field: string,
   ) { super() }
 }
-
-// type LazyScope = Map<string, Lazy<Cell>>

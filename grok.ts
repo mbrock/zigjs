@@ -105,8 +105,11 @@ class Grok {
         return {
           kind,
           name: this.getChildText(x, "Ident"),
-          isConstant: hasChild(x, "const"),
-          typeExpr: Zig.lazy(() => this.grokExpr(getChild(x, "Type"))),
+          mutability: hasChild(x, "const")
+            ? Zig.Mutability.Constant
+            : Zig.Mutability.Variable,
+          typeExpr: Zig.lazy(() =>
+            this.grokExpr(getChild(x, "Type"))),
           initExpr: hasChild(x, "Expr")
             ? Zig.lazy(() => this.grokExpr(getChild(x, "Expr")))
             : null,
@@ -152,6 +155,9 @@ class Grok {
     switch (kind) {
       case "VarDecl": return new Zig.VarStmt(
         this.getChildText(x, "Ident"),
+        hasChild(x, "const")
+          ? Zig.Mutability.Constant
+          : Zig.Mutability.Variable,
         hasChild(x, "Expr")
           ? this.grokExpr(getChild(x, "Expr"))
           : null,

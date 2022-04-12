@@ -1,5 +1,5 @@
 import { grokFile } from "./grok"
-import { Struct } from "./zigeval"
+import { Container, Frame } from "./zigeval"
 import { parser } from "./dist/zig"
 
 import { EditorState, EditorView, basicSetup } from "@codemirror/basic-setup"
@@ -116,11 +116,13 @@ const underlineKeymap = keymap.of([{
   parent: document.body
 })
 
+let name = "linked_list.zig"
+
 let mod = grokFile(
   example,
-  "linked_list.zig",
+  name,
   parser.configure({ strict: true }).parse(example).topNode
 )
 
-let ctx = new Struct(mod)
-ctx.runTests(mod, (x: string) => !!x.match(/Singly/))
+let ctx = new Container(name, mod, new Frame())
+ctx.runTests((x: string) => !!x.match(/Singly/))

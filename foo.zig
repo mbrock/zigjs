@@ -1,32 +1,41 @@
 const std = @import("std");
 
-fn foo(x: *const *u32) u32 {
-    _ = x;
+fn S(comptime a: bool) type {
+    return struct {
+        const b = a;
+        var x: u32 = 0;
+
+        y: u32 = 0,
+
+        fn foo(this: @This()) u32 {
+            return this.y;
+        }
+    };
 }
 
-f1: u32 = 1,
-f2: u32 = 0,
-
-const c1 = c2;
-const c2 = v1;
-
-var v1: u32 = v2;
-var v2: u32 = @compileError("x");
-
-const S1 = struct {
-    var s1v: u32 = 0;
-
-    s1f: u32 = 0,
-
-    const S2 = struct {
-        var s2v = s1v;
-    };
-};
+const S1 = S(false);
+const S2 = S(true);
 
 pub fn main() void {
-    var x = S1{};
-    var y = @This(){};
-    _ = x;
-    _ = y;
-    _ = c1;
+    S1.x = 1;
+
+    const x: u32 = 2;
+
+    const SL = struct {
+        foo: u32 = 0,
+        test "foo" {
+            std.testing.expectEqual(x, 3);
+        }
+    };
+
+    const sl = SL{};
+    _ = sl;
+
+    var s1a = S1{ .y = 1 };
+    var s1b = S1{ .y = x };
+
+    std.log.warn(
+        "{d} {d} {d} {d}",
+        .{ S1.x, S2.x, S1.foo(s1a), S1.foo(s1b) },
+    );
 }
