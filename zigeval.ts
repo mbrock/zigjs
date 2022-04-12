@@ -1,9 +1,10 @@
-interface IntValue {
-  kind: "IntValue"
-  int: number
-}
-
-type Value = IntValue
+//
+// zigeval: a simple Zig interpreter
+//
+// SPDX-License-Identifier: MIT
+//
+// Copyright 2022, Mikael Brockman <mikael@brockman.se>
+//
 
 class Cell {
   constructor(
@@ -15,14 +16,54 @@ type Scope = Map<string, Cell>
 type Stack = Scope[]
 
 export class Lazy<T> {
-  x: T | undefined
-  constructor(private f: () => T) {}
-  need(): T { return this.x = this.f() }
+  value: T
+  state: "have" | "need" | "busy" = "need"
+  
+  constructor(private thunk: () => T) {}
+  
+  need(): T {
+    switch (this.state) {
+      case "have": return this.value
+      case "busy": throw error("circular dependency", this)
+      case "need": {
+        this.state = "busy"
+        this.value = this.thunk()
+        this.state = "have"
+        return this.value
+      }
+    }
+  }
 }
 
 export function lazy<T>(f: () => T): Lazy<T> {
   return new Lazy(f)
 }
+
+export class ZigBug extends Error {
+  constructor(...msg: string[]) { super(msg.join(" ")) }
+}
+
+export function bug(...x: any[]): Error {
+  console.error(...x)
+  debugger
+  return new ZigBug(...x.map(x => x.toString()))
+}
+
+class ZigError extends Error {
+  constructor(msg: string, public data: any) { super(msg) }
+}
+
+function error(x: string, data: any): Error {
+  console.error("𝍐", x)
+  return new ZigError(x, data)
+}
+
+interface IntValue {
+  kind: "IntValue"
+  int: number
+}
+
+type Value = IntValue
 
 /// This is a concrete struct type, not a struct instance.
 export class Struct {
@@ -122,25 +163,6 @@ function evalExpr(stack: Stack, expr: Expr): Value {
   } finally {
     console.groupEnd()
   }
-}
-
-export class ZigBug extends Error {
-  constructor(...msg: string[]) { super(msg.join(" ")) }
-}
-
-export function bug(...x: any[]): Error {
-  console.error(...x)
-  debugger
-  return new ZigBug(...x.map(x => x.toString()))
-}
-
-class ZigError extends Error {
-  constructor(msg: string, public data: any) { super(msg) }
-}
-
-function error(x: string, data: any): Error {
-  console.error("𝍐", x)
-  return new ZigError(x, data)
 }
 
 export type Decl = TestDecl | VarDecl | FnDecl

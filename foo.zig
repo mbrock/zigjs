@@ -4,10 +4,11 @@ fn foo(x: *const *u32) u32 {
     _ = x;
 }
 
-f1: u32,
+f1: u32 = 1,
+f2: u32 = 0,
 
 const c1 = c2;
-const c2 = c1;
+const c2 = v1;
 
 var v1: u32 = v2;
 var v2: u32 = @compileError("x");
@@ -24,5 +25,8 @@ const S1 = struct {
 
 pub fn main() void {
     var x = S1{};
+    var y = @This(){};
     _ = x;
+    _ = y;
+    _ = c1;
 }
