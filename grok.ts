@@ -6,7 +6,7 @@ type ExprNodeName =
   "Number" | "Exp1" | "Call" | "Ident" | "Prim" |
   "Instantiation" | "Try" | "FieldAccess" | "AddressOf" |
   "Equals" | "PlusAssign" | "ForceField" | "null" | "Return" |
-  "Struct"
+  "Struct" | "CallBuiltin" | "String"
 
 type DeclNodeName = "TestDecl" | "VarDecl" | "FnDecl" | "FieldDecl"
 
@@ -217,6 +217,11 @@ class Grok {
         getChildren(x, "Expr").map(y => this.grokExpr(y)),
       )
 
+      case "CallBuiltin": return new Zig.CallBuiltinExpr(
+        this.getText(getChild(x, "AtId")),
+        getChildren(x, "Expr").map(y => this.grokExpr(y)),
+      )
+
       case "Struct": return new Zig.StructExpr(
         this.grokStruct("anonymous", x)
       )
@@ -229,9 +234,15 @@ class Grok {
         primTypes[this.getText(x)],
       )
 
-      case "Number": return new Zig.NumberExpr(
-        parseInt(this.getText(x)),
-      )
+      case "Number": return new Zig.LitExpr({
+        kind: "IntValue",
+        int: parseInt(this.getText(x)),
+      })
+
+      case "String": return new Zig.LitExpr({
+        kind: "StringValue",
+        string: this.getText(x).slice(1, -1),
+      })
 
       case "AddressOf": return new Zig.AddressExpr(
         this.grokExpr(getChild(x, "Exp1")),

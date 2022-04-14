@@ -1,0 +1,5 @@
+This is a Zig interpreter written in TypeScript.
+
+Why?  Mainly to bootstrap the self-hosting compiler.  But maybe also
+to act as a reference implementation.  And it might be useful for some
+tooling tasks.

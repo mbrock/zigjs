@@ -41,7 +41,7 @@ export enum Mutability {
 
 export class Lazy<T, Meta = null> {
   content: T | undefined
-  
+
   constructor(
     public mutability: Mutability,
     private thunk: () => T,
@@ -52,14 +52,14 @@ export class Lazy<T, Meta = null> {
     if (this.content === undefined) {
       this.content = this.thunk()
     }
-    
+
     return this.content
   }
-  
+
   write(x: T) {
     if (this.mutability === Mutability.Constant) {
       throw error("change constant", this)
-    } else { 
+    } else {
       this.content = x
     }
   }
@@ -78,7 +78,7 @@ type Computer<T> = Generator<Suspension, T>
 export class Cell<T, Meta = null> {
   content: T | undefined
   state: "have" | "need" | "busy" = "need"
-  
+
   constructor(
     public mutability: Mutability,
     private thunk: () => Computer<T>,
@@ -106,17 +106,19 @@ export class Cell<T, Meta = null> {
       }
     }
   }
-  
+
   write(x: T) {
     if (this.mutability === Mutability.Constant) {
       throw error("change constant", this)
-    } else { 
+    } else {
       this.content = x
     }
   }
 }
 
-type Value = IntValue | FunctionValue | TypeValue | InstanceValue
+type Value =
+  StringValue | IntValue | FunctionValue |
+  TypeValue | InstanceValue
 
 interface TypeValue {
   kind: "TypeValue"
@@ -126,6 +128,11 @@ interface TypeValue {
 interface IntValue {
   kind: "IntValue"
   int: number
+}
+
+interface StringValue {
+  kind: "StringValue"
+  string: string
 }
 
 interface FunctionValue {
@@ -187,19 +194,19 @@ function bindWithoutShadowing<T>(
 
 export class Container {
   bindings = new Map<string, Cell<Value, Decl>>()
-  
+
   constructor(
     public name: string,
     public decl: StructDecl,
     public stack: Frame,
     public parent: null | Container = null,
   ) {}
-  
+
   *initialize() {
     for (const x of this.decl.decls.values()) {
       const { kind, name } = x
       let thunk: () => Computer<Value>
-      
+
       if (kind == "VarDecl") {
         thunk = (function* () {
           return yield* evalExpr(
@@ -226,14 +233,14 @@ export class Container {
         this, name, new Cell(Mutability.Constant, thunk, x))
     }
   }
-  
+
   runTests(
     predicate: (name: string) => boolean
   ): void {
     console.groupCollapsed("⚙", "Bindings for", this.name)
     console.log(this.bindings)
     console.groupEnd()
-    
+
     for (const cell of this.bindings.values()) {
       console.log(cell)
       const { kind, name } = cell.meta
@@ -268,7 +275,7 @@ export class Container {
 
 export abstract class Stmt {
   public src: string | null
-  
+
   *run(
     _container: Container, _stack: Frame
   ): Computer<void> {
@@ -278,7 +285,7 @@ export abstract class Stmt {
 
 export abstract class Expr {
   public src: string | null
-  
+
   *eval(
     _container: Container, _stack: Frame
   ): Computer<Value> {
@@ -445,10 +452,55 @@ export class AddressExpr extends Expr {
   ) { super() }
 }
 
-export class NumberExpr extends Expr {
+export class LitExpr extends Expr {
   constructor(
-    public val: number,
+    public val: Value,
   ) { super() }
+
+  *eval(_container: Container, _stack: Frame): Computer<Value> {
+    return this.val
+  }
+}
+
+export class CallBuiltinExpr extends Expr {
+  constructor(
+    public builtin: string,
+    public args: Expr[],
+  ) { super() }
+
+  *eval(container: Container, stack: Frame): Computer<Value> {
+    let args: Value[] = []
+    for (let expr of this.args) {
+      args.push(yield* expr.eval(container, stack))
+    }
+
+    if (this.builtin === "@import") {
+      if (args.length !== 1) {
+        throw error("@import mismatch", args)
+      }
+
+      let arg = args[0]
+      if (arg.kind !== "StringValue")
+        throw error("@import mismatch", arg)
+
+      if (arg.string === "std.zig") {
+        // XXX: we need std.testing.expect
+        let decls = new Map<string, Decl>()
+
+        let stdContainer = new Container(
+          "std", { name: "std", decls }, new Frame(), null)
+
+        return {
+          kind: "InstanceValue",
+          container: stdContainer,
+          fields: new Map(),
+        }
+
+      } else {
+        throw bug(this.builtin, arg)
+      }
+    }
+  }
 }
 
 export class CallExpr extends Expr {
@@ -464,13 +516,13 @@ export class CallExpr extends Expr {
     if (callee.kind === "FunctionValue") {
       const params = callee.decl.params.read()
       const body = callee.decl.body.read()
-      
+
       if (params.length !== args.length) {
         throw error("args mismatch", { callee, params, args })
       }
 
       let frame = new Frame(new Map(), callee.stack)
-      
+
       let i = 0
       for (let param of params) {
         let arg = yield* args[i++]
@@ -504,7 +556,7 @@ export class VarExpr extends Expr {
 
   *eval(container: Container, stack: Frame): Computer<Value> {
     const { name } = this
-    
+
     const cell = resolve(stack, name) || resolve(container, name)
     if (cell !== undefined) {
       return yield* cell.read()
@@ -534,7 +586,7 @@ export class InstanceExpr extends Expr {
 
   *eval(container: Container, stack: Frame): Computer<Value> {
     let typeValue = yield* this.type.eval(container, stack)
-    
+
     if (typeValue.kind !== "TypeValue") {
       throw error("not a type", typeValue)
     }
@@ -543,13 +595,13 @@ export class InstanceExpr extends Expr {
     if (structType.kind !== "StructType") {
       throw error("not a struct type", structType)
     }
-    
+
     let fields = new Map<string, Value>()
     for (let field of this.fields) {
       let value = yield* field.expr.eval(container, stack)
       fields.set(field.name, value)
     }
-    
+
     return {
       kind: "InstanceValue",
       container: structType.container,
@@ -562,7 +614,7 @@ export class TryExpr extends Expr {
   constructor(
     public expr: Expr
   ) { super() }
-  
+
   *eval(container: Container, stack: Frame): Computer<Value> {
     let x = yield* this.expr.eval(container, stack)
     return x
@@ -586,7 +638,7 @@ export class FieldAccessExpr extends Expr {
     public lhs: Expr,
     public field: string,
   ) { super() }
-  
+
   *eval(container: Container, stack: Frame): Computer<Value> {
     let lhs = yield* this.lhs.eval(container, stack)
     if (lhs.kind !== "InstanceValue") {
@@ -596,7 +648,8 @@ export class FieldAccessExpr extends Expr {
     if (lhs.fields.has(this.field)) {
       return lhs.fields.get(this.field)
     } else {
-      throw error("no such field", { lhs, field: this.field })
+      // XXX: handle non-field bindings
+      throw error(`no field ${this.field}`, { lhs, field: this.field })
     }
   }
 }
