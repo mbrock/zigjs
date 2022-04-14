@@ -25,10 +25,55 @@ function error(x: string, data: any): Error {
   return new ZigError(x, data)
 }
 
+abstract class Suspension {
+}
+
+class ReturnSuspension extends Suspension {
+  constructor (public value: Value) {
+    super()
+  }
+}
+
 export enum Mutability {
   Constant = "Constant",
   Variable = "Variable",
 }
+
+export class Lazy<T, Meta = null> {
+  content: T | undefined
+  
+  constructor(
+    public mutability: Mutability,
+    private thunk: () => T,
+    public meta: Meta,
+  ) {}
+
+  read() {
+    if (this.content === undefined) {
+      this.content = this.thunk()
+    }
+    
+    return this.content
+  }
+  
+  write(x: T) {
+    if (this.mutability === Mutability.Constant) {
+      throw error("change constant", this)
+    } else { 
+      this.content = x
+    }
+  }
+}
+
+export function lazy<T, Meta = null>(
+  thunk: () => T,
+  mutability: Mutability = Mutability.Constant,
+  meta: Meta = null,
+): Lazy<T, Meta> {
+  return new Lazy(mutability, thunk, meta)
+}
+
+type Computer<T> = Generator<Suspension, T>
 
 export class Cell<T, Meta = null> {
   content: T | undefined
@@ -36,9 +81,18 @@ export class Cell<T, Meta = null> {
   
   constructor(
     public mutability: Mutability,
-    private thunk: () => Generator<Suspension, T>,
+    private thunk: () => Computer<T>,
     public meta: Meta,
   ) {}
+
+  static make<T, Meta = null>(
+    value: T, mutability: Mutability, meta?: Meta
+  ): Cell<T, Meta> {
+    let thunk = function* () { return value }
+    let cell = new Cell(mutability, thunk, meta)
+    cell.read()
+    return cell
+  }
 
   *read() {
     switch (this.state) {
@@ -62,23 +116,7 @@ export class Cell<T, Meta = null> {
   }
 }
 
-export function lazy<T, Meta = null>(
-  thunk: () => Generator<Suspension, T>,
-  mutability: Mutability = Mutability.Constant,
-  meta: Meta = null,
-): Cell<T, Meta> {
-  return new Cell(mutability, thunk, meta)
-}
-
-export function eager<T, Meta>(
-  value: T,
-  mutability: Mutability = Mutability.Constant,
-  meta: Meta = null,
-): Cell<T, Meta> {
-  return lazy(function*() { return value }, mutability, meta)
-}
-
-type Value = IntValue | FunctionValue | TypeValue
+type Value = IntValue | FunctionValue | TypeValue | InstanceValue
 
 interface TypeValue {
   kind: "TypeValue"
@@ -95,6 +133,12 @@ interface FunctionValue {
   decl: FnDecl
   container: Container
   stack: Frame
+}
+
+interface InstanceValue {
+  kind: "InstanceValue"
+  container: Container
+  fields: Map<string, Value>
 }
 
 interface Binder<T> {
@@ -154,30 +198,32 @@ export class Container {
   *initialize() {
     for (const x of this.decl.decls.values()) {
       const { kind, name } = x
-      let thunk: () => Generator<Suspension, Value>
+      let thunk: () => Computer<Value>
       
       if (kind == "VarDecl") {
-        thunk = function* () {
+        thunk = (function* () {
           return yield* evalExpr(
-            this, this.stack, yield* x.initExpr.read())
-        }
+            this, this.stack, x.initExpr.read())
+        }).bind(this)
       } else if (kind == "FnDecl") {
-        thunk = function* () {
+        thunk = (function* () {
           return {
             kind: "FunctionValue",
             decl: x,
             container: this,
             stack: this.stack,
           }
-        }
+        }).bind(this)
       } else if (kind == "TestDecl") {
         thunk = () => { throw bug("implement tests") }
+      } else if (kind == "FieldDecl") {
+        thunk = () => { throw bug("implement fields") }
       } else {
         throw bug(kind)
       }
 
       bindWithoutShadowing(
-        this, name, lazy(thunk, Mutability.Constant, x))
+        this, name, new Cell(Mutability.Constant, thunk, x))
     }
   }
   
@@ -189,10 +235,17 @@ export class Container {
     console.groupEnd()
     
     for (const cell of this.bindings.values()) {
+      console.log(cell)
       const { kind, name } = cell.meta
       if (kind == "TestDecl") {
         if (predicate.call(null, name)) {
-          this.runTest(name, cell.meta)
+          let value = this.runTest(name, cell.meta)
+          let result = value.next()
+          if (result.done) {
+            continue
+          } else {
+            debugger
+          }
         } else {
           console.info("skipping", name)
         }
@@ -200,12 +253,12 @@ export class Container {
     }
   }
 
-  *runTest(name: string, decl: TestDecl): Generator<Suspension, void> {
+  *runTest(name: string, decl: TestDecl): Computer<void> {
     try {
       console.group("🤓", "Test:", name)
-      let body = yield* decl.body.read()
+      let body = decl.body.read()
       for (let stmt of body) {
-        runStmt(this, this.stack, stmt)
+        yield* runStmt(this, this.stack, stmt)
       }
     } finally {
       console.groupEnd()
@@ -213,15 +266,12 @@ export class Container {
   }
 }
 
-type Suspension =
-  { kind: "return", value: Value }
-
 export abstract class Stmt {
   public src: string | null
   
   *run(
     _container: Container, _stack: Frame
-  ): Generator<Suspension, void> {
+  ): Computer<void> {
     throw bug("Define evaluation for", this)
   }
 }
@@ -231,7 +281,7 @@ export abstract class Expr {
   
   *eval(
     _container: Container, _stack: Frame
-  ): Generator<Suspension, Value> {
+  ): Computer<Value> {
     throw bug("Define evaluation for", this)
   }
 }
@@ -240,10 +290,10 @@ function* runStmt(
   container: Container,
   stack: Frame,
   stmt: Stmt,
-): Generator<Suspension, void> {
+): Computer<void> {
   console.group("⦿", stmt.src)
   try {
-    stmt.run(container, stack)
+    yield* stmt.run(container, stack)
   } finally {
     console.groupEnd()
   }
@@ -253,7 +303,7 @@ function* evalExpr(
   container: Container,
   stack: Frame,
   expr: Expr,
-): Generator<Suspension, Value> {
+): Computer<Value> {
   console.group("•", expr.src)
   try {
     let result = yield* expr.eval(container, stack)
@@ -264,7 +314,7 @@ function* evalExpr(
   }
 }
 
-export type Decl = TestDecl | VarDecl | FnDecl
+export type Decl = TestDecl | VarDecl | FnDecl | FieldDecl
 
 export interface StructDecl {
   name: string
@@ -274,15 +324,22 @@ export interface StructDecl {
 export interface TestDecl {
   kind: "TestDecl"
   name: string
-  body: Cell<Stmt[]>
+  body: Lazy<Stmt[]>
 }
 
 export interface VarDecl {
   kind: "VarDecl"
   name: string
   mutability: Mutability
-  typeExpr: Cell<Expr>
-  initExpr: null | Cell<Expr>
+  typeExpr: Lazy<Expr>
+  initExpr: null | Lazy<Expr>
+}
+
+export interface FieldDecl {
+  kind: "FieldDecl"
+  name: string
+  typeExpr: Lazy<Expr>
+  initExpr: null | Lazy<Expr>
 }
 
 export interface Param {
@@ -295,9 +352,9 @@ export interface FnDecl {
   kind: "FnDecl"
   name: string
   isPublic: boolean
-  params: Cell<Param[]>
-  returnTypeExpr: Cell<Expr>
-  body: Cell<Stmt[]>
+  params: Lazy<Param[]>
+  returnTypeExpr: Lazy<Expr>
+  body: Lazy<Stmt[]>
 }
 
 interface IntType {
@@ -309,6 +366,7 @@ interface IntType {
 export type Type =
   { kind: "VoidType" } |
   { kind: "TypeType" } |
+  { kind: "StructType", container: Container } |
   IntType
 
 // def stmt
@@ -336,10 +394,10 @@ export class VarStmt extends Stmt {
     public init: Expr | null,
   ) { super () }
 
-  run(container: Container, stack: Frame): void {
-    let value = evalExpr(container, stack, this.init)
+  *run(container: Container, stack: Frame): Computer<void> {
+    let value = yield* evalExpr(container, stack, this.init)
     bindWithoutShadowing(
-      stack, this.name, eager(value, this.mutability))
+      stack, this.name, Cell.make(value, this.mutability))
   }
 }
 
@@ -347,6 +405,10 @@ export class ExprStmt extends Stmt {
   constructor (
     public expr: Expr,
   ) { super () }
+
+  *run(container: Container, stack: Frame): Computer<void> {
+    yield* this.expr.eval(container, stack)
+  }
 }
 
 export class BlockStmt extends Stmt {
@@ -395,24 +457,42 @@ export class CallExpr extends Expr {
     public args: Expr[],
   ) { super() }
 
-  eval(container: Container, stack: Frame): Value {
-    const callee = evalExpr(container, stack, this.callee)
+  *eval(container: Container, stack: Frame): Computer<Value> {
+    const callee = yield* evalExpr(container, stack, this.callee)
     const args = this.args.map(x => evalExpr(container, stack, x))
 
     if (callee.kind === "FunctionValue") {
-      const params = callee.decl.params.value
-      const body = callee.decl.body.value
+      const params = callee.decl.params.read()
+      const body = callee.decl.body.read()
       
       if (params.length !== args.length) {
         throw error("args mismatch", { callee, params, args })
       }
 
       let frame = new Frame(new Map(), callee.stack)
-      params.forEach((param, i) => {
-        bindWithoutShadowing(frame, param.name, eager(args[i]))
-      })
+      
+      let i = 0
+      for (let param of params) {
+        let arg = yield* args[i++]
+        bindWithoutShadowing(
+          frame, param.name, Cell.make(arg, Mutability.Constant))
+      }
+
+      for (let stmt of body) {
+        let computer = stmt.run(container, frame)
+        let result = computer.next()
+        if (result.done) {
+          continue
+        } else if (result.value instanceof ReturnSuspension) {
+          return result.value.value
+        } else {
+          throw bug(result)
+        }
+      }
+
+      throw bug("called function didn't return")
     } else {
-      debugger
+      throw bug("calling", callee)
     }
   }
 }
@@ -422,12 +502,12 @@ export class VarExpr extends Expr {
     public name: string
   ) { super() }
 
-  eval(container: Container, stack: Frame): Value {
+  *eval(container: Container, stack: Frame): Computer<Value> {
     const { name } = this
     
     const cell = resolve(stack, name) || resolve(container, name)
     if (cell !== undefined) {
-      return cell.value
+      return yield* cell.read()
     } else {
       throw error(`unbound identifier ${this.name}`, {
         expr: this, container, stack
@@ -441,7 +521,7 @@ export class PrimExpr extends Expr {
     public type: Type
   ) { super() }
 
-  eval(_container: Container, _stack: Frame): Value {
+  *eval(_container: Container, _stack: Frame): Computer<Value> {
     return { kind: "TypeValue", type: this.type }
   }
 }
@@ -451,12 +531,54 @@ export class InstanceExpr extends Expr {
     public type: Expr,
     public fields: { name: string, expr: Expr }[],
   ) { super() }
+
+  *eval(container: Container, stack: Frame): Computer<Value> {
+    let typeValue = yield* this.type.eval(container, stack)
+    
+    if (typeValue.kind !== "TypeValue") {
+      throw error("not a type", typeValue)
+    }
+
+    let structType = typeValue.type
+    if (structType.kind !== "StructType") {
+      throw error("not a struct type", structType)
+    }
+    
+    let fields = new Map<string, Value>()
+    for (let field of this.fields) {
+      let value = yield* field.expr.eval(container, stack)
+      fields.set(field.name, value)
+    }
+    
+    return {
+      kind: "InstanceValue",
+      container: structType.container,
+      fields,
+    }
+  }
 }
 
 export class TryExpr extends Expr {
   constructor(
     public expr: Expr
   ) { super() }
+  
+  *eval(container: Container, stack: Frame): Computer<Value> {
+    let x = yield* this.expr.eval(container, stack)
+    return x
+  }
+}
+
+export class ReturnExpr extends Expr {
+  constructor(
+    public expr: Expr
+  ) { super() }
+
+  *eval(container: Container, stack: Frame): Computer<Value> {
+    let x = yield* this.expr.eval(container, stack)
+    yield new ReturnSuspension(x)
+    throw bug("unreachable")
+  }
 }
 
 export class FieldAccessExpr extends Expr {
@@ -464,4 +586,35 @@ export class FieldAccessExpr extends Expr {
     public lhs: Expr,
     public field: string,
   ) { super() }
+  
+  *eval(container: Container, stack: Frame): Computer<Value> {
+    let lhs = yield* this.lhs.eval(container, stack)
+    if (lhs.kind !== "InstanceValue") {
+      throw error("not an instance", lhs)
+    }
+
+    if (lhs.fields.has(this.field)) {
+      return lhs.fields.get(this.field)
+    } else {
+      throw error("no such field", { lhs, field: this.field })
+    }
+  }
+}
+
+export class StructExpr extends Expr {
+  constructor(
+    public decl: StructDecl
+  ) { super() }
+
+  *eval(container: Container, stack: Frame): Computer<Value> {
+    let struct = new Container(this.decl.name, this.decl, stack, container)
+    yield* struct.initialize()
+    return {
+      kind: "TypeValue",
+      type: {
+        kind: "StructType",
+        container: struct,
+      },
+    }
+  }
 }

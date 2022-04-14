@@ -124,5 +124,21 @@ let mod = grokFile(
   parser.configure({ strict: true }).parse(example).topNode
 )
 
-let ctx = new Container(name, mod, new Frame())
-ctx.runTests((x: string) => !!x.match(/Singly/))
+function* run() {
+  let ctx = new Container(name, mod, new Frame())
+  yield* ctx.initialize()
+  ctx.runTests((x: string) => !!x.match(/Singly/))
+}
+
+let computer = run()
+while (true) {
+  console.log(computer)
+  let result = computer.next()
+  if (result.done) {
+    console.log("done")
+    break
+  } else {
+    console.log(result.value)
+    debugger
+  }
+}

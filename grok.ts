@@ -5,9 +5,10 @@ import * as Zig from "./zigeval"
 type ExprNodeName =
   "Number" | "Exp1" | "Call" | "Ident" | "Prim" |
   "Instantiation" | "Try" | "FieldAccess" | "AddressOf" |
-  "Equals" | "PlusAssign" | "ForceField" | "null"
+  "Equals" | "PlusAssign" | "ForceField" | "null" | "Return" |
+  "Struct"
 
-type DeclNodeName = "TestDecl" | "VarDecl" | "FnDecl"
+type DeclNodeName = "TestDecl" | "VarDecl" | "FnDecl" | "FieldDecl"
 
 export function grokFile(
   src: string, name: string, node: SyntaxNode
@@ -129,6 +130,17 @@ class Grok {
             getChildren(x, "Stmt").map(y => this.grokStmt(y))),
         }
 
+      case "FieldDecl":
+        return {
+          kind,
+          name: this.getChildText(x, "Ident"),
+          typeExpr: Zig.lazy(() =>
+            this.grokExpr(getChild(x, "Type"))),
+          initExpr: hasChild(x, "Expr")
+            ? Zig.lazy(() => this.grokExpr(getChild(x, "Expr")))
+            : null,
+        }
+
       default: throw Zig.bug("grok decl", kind)
     }
   }
@@ -205,6 +217,10 @@ class Grok {
         getChildren(x, "Expr").map(y => this.grokExpr(y)),
       )
 
+      case "Struct": return new Zig.StructExpr(
+        this.grokStruct("anonymous", x)
+      )
+
       case "Ident": return new Zig.VarExpr(
         this.getText(x),
       )
@@ -228,6 +244,10 @@ class Grok {
       )
 
       case "Try": return new Zig.TryExpr(
+        this.grokExpr(getChild(x, "Expr")),
+      )
+
+      case "Return": return new Zig.ReturnExpr(
         this.grokExpr(getChild(x, "Expr")),
       )
 
